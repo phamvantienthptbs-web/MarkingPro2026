@@ -151,6 +151,7 @@
 </nav>
 <div id="msg" role="status" aria-live="polite"></div>
 
+<!-- Đã cập nhật phiên bản SheetJS mới nhất -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (() => {
@@ -268,6 +269,7 @@
     $('kqBox').innerHTML = `<div class="big">${f(r.tong)}<small>/10</small></div><div><b>${esc(ten)}</b><br><small>Phần I ${f(r.s1)} · II ${f(r.s2)} · III ${f(r.s3)}</small></div><button type="button" class="alt" id="btnUndo">Hoàn tác</button>`;
     ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = ''); upd();$('dAns').open = false;
   };
+  
   $('kqBox').onclick = e => {
     if (e.target.id !== 'btnUndo' || kq[kq.length - 1] !== lastRec) return;
     kq.pop(); SV('phieu.kq', kq); render(); $('kqBox').hidden = true; msg('Đã hoàn tác bài vừa lưu.');
@@ -289,8 +291,29 @@
       <td><button type="button" data-i="${r.i}" aria-label="Xóa bài của ${esc(r.ten)}">×</button></td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">Chưa có bài nào. Sang tab Quét, chấm bài đầu tiên rồi quay lại đây.</td></tr>';
   }
+  
   $('fMon').onchange =$('fQ').oninput = render;
   $('tb').onclick = e => { const i = e.target.dataset.i; if (i === undefined) return; kq.splice(+i, 1); SV('phieu.kq', kq); render(); };$('btnClr').onclick = () => { if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { kq = []; SV('phieu.kq', kq); render(); } };
+
+  // ===== SỬA LỖI CAMERA (Đã được bổ sung) =====
+  $('btnStart').onclick = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } // Dùng camera sau trên điện thoại
+      });
+      const video = $('video');
+      video.srcObject = stream;
+      await video.play();
+      $('btnScan').disabled = false; 
+      $('status').textContent = 'Camera đã bật thành công.';
+      $('status').className = 'ok';
+    } catch (err) {
+      $('status').textContent = 'Lỗi camera: ' + err.message;
+      $('status').className = 'err';
+      alert('Không thể bật camera. Hãy đảm bảo bạn đã cấp quyền và trang web đang chạy trên HTTPS (hoặc localhost).');
+    }
+  };
+  // ===========================================
 
   $('btnXls').onclick = () => {
     if (!kq.length) return msg('Chưa có bài nào để xuất.', 'err');
@@ -310,7 +333,7 @@
     XLSX.writeFile(wb, 'diem-trac-nghiem-' + new Date().toISOString().slice(0, 10) + '.xlsx');
   };
 
-  // ===== Chức năng bổ sung: Xuất / Nhập Excel Mẫu =====
+  // ===== CHỨC NĂNG XUẤT / NHẬP EXCEL MẪU =====
   $('btnXlsMau').onclick = () => {
     if (!window.XLSX) return msg('Chưa tải được thư viện Excel. Vui lòng kiểm tra mạng.', 'err');
     const ws = XLSX.utils.aoa_to_sheet([
@@ -339,10 +362,12 @@
         let countDs = 0, countDiem = 0;
 
         rows.forEach(r => {
+          if (!r) return; // Bỏ qua nếu dòng rỗng
           const keys = Object.keys(r);
+          
           const getVal = (kws) => {
             const key = keys.find(k => kws.some(kw => k.toLowerCase().includes(kw)));
-            return key ? String(r[key]).trim() : '';
+            return key && r[key] !== undefined ? String(r[key]).trim() : '';
           };
 
           const sbd = getVal(['sbd', 'báo danh']);
@@ -380,15 +405,16 @@
           render();
         }
 
-        msg(`Đã nhập thành công ${countDs} học sinh${countDiem > 0 ? ` và ${countDiem} bản ghi điểm` : ''}.`, 'ok');
+        msg(`Đã nhập thành công ${countDs} học sinh${countDiem > 0 ? ` và ${countDiem} điểm` : ''}.`, 'ok');
       } catch (err) {
-        msg('Lỗi đọc file Excel: File không đúng định dạng.', 'err');
+        msg('Lỗi đọc file Excel: File bị hỏng hoặc không đúng chuẩn.', 'err');
+        console.error(err);
       }
-      e.target.value = ''; 
+      e.target.value = ''; // Xoá file trong input để lần sau chọn lại vẫn trigger onchange
     };
     reader.readAsArrayBuffer(file);
   };
-  // ====================================================
+  // ===========================================
 
   window.Phieu = {
     mau: () => radio('mau'),
