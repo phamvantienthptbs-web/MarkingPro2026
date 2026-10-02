@@ -42,9 +42,9 @@
   button:focus-visible, .file:focus-within, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
   .cam { position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:3/4; }
   video { width:100%; height:100%; object-fit:cover; display:block; }
-  .guide { position:absolute; inset:6%; border:2px dashed rgba(255,255,255,.6); border-radius:6px; pointer-events:none; }
+  canvas#out { width:100%; height:100%; object-fit:cover; display:block; background:#fff; position: absolute; top: 0; left: 0;}
+  .guide { position:absolute; inset:6%; border:2px dashed rgba(255,255,255,.6); border-radius:6px; pointer-events:none; z-index: 2; }
   #status { min-height:1.5em; font-size:.9rem; } #status.err { color:var(--bad); } #status.ok { color:var(--ok); }
-  canvas#out { width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff; }
   pre { background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; overflow-x:auto; font-size:.85rem; white-space:pre-wrap; }
   #hs { margin-top:14px; } #hs h2, .card h2 { font-size:1rem; font-weight:800; margin:12px 0 4px; } details { margin:6px 0; } summary { cursor:pointer; font-weight:600; padding:4px 0; }
   #kqBox { display:flex; align-items:center; gap:12px; background:var(--ink); color:#fff; border-radius:10px; padding:10px 14px; margin-top:8px; }
@@ -104,13 +104,20 @@
 
 <!-- ============ QUÉT ============ -->
 <section id="t-quet" class="tab" hidden>
-  <div class="cam"><video id="video" playsinline muted></video><div class="guide"></div></div>
-  <div class="row"><button id="btnStart">Bật camera</button><button id="btnScan" disabled>Chụp và chấm</button></div>
+  <div class="cam">
+    <video id="video" playsinline muted></video>
+    <canvas id="out" hidden></canvas>
+    <div class="guide" id="guide-box"></div>
+  </div>
+  <div class="row">
+    <button id="btnStart">Bật camera</button>
+    <button id="btnScan" disabled>Chụp và chấm</button>
+  </div>
+  <div class="row"><button id="btnResumeCam" class="alt" hidden>Quét tiếp bài khác</button></div>
   <div class="row"><label class="file" style="margin:0">Chọn ảnh có sẵn<input id="file" type="file" accept="image/*"></label></div>
-  <div id="status" role="status" aria-live="polite">Đang tải OpenCV.js…</div>
+  <div id="status" role="status" aria-live="polite">Đang chờ bật camera...</div>
 
   <canvas id="cap" hidden></canvas>
-  <canvas id="out" hidden></canvas>
   <pre id="result" hidden></pre>
   <small>Đặt cả tờ phiếu trong khung nét đứt, nền tối, đủ sáng, giữ máy thẳng. Vòng xanh = ô được nhận là đã tô; vòng đỏ = ô trống.</small>
 
@@ -151,8 +158,9 @@
 </nav>
 <div id="msg" role="status" aria-live="polite"></div>
 
-<!-- Đã cập nhật phiên bản SheetJS mới nhất -->
+<!-- Thư viện SheetJS để xuất/nhập Excel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
 <script>
 (() => {
   const $ = id => document.getElementById(id), Q = s => document.querySelector(s);
@@ -231,6 +239,8 @@
     p3: c.trim().split(/[\s;|]+/)
   });
   const num = x => { x = (x || '').replace(',', '.'); return x === '' || x === '-' ? null : (isNaN(+x) ? x : +x); };
+  
+  // HÀM CHẤM ĐIỂM
   function cham(m, k, a) {
     let s1 = 0, s2 = 0, s3 = 0, d = 0;
     for (let i = 0; i < m.n[0]; i++) if (a.p1[i] && a.p1[i] !== '-' && a.p1[i] === k.p1[i]) { s1 += .25; d++; }
@@ -268,6 +278,11 @@
     $('kqBox').hidden = false;
     $('kqBox').innerHTML = `<div class="big">${f(r.tong)}<small>/10</small></div><div><b>${esc(ten)}</b><br><small>Phần I ${f(r.s1)} · II ${f(r.s2)} · III ${f(r.s3)}</small></div><button type="button" class="alt" id="btnUndo">Hoàn tác</button>`;
     ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = ''); upd();$('dAns').open = false;
+    
+    // Đã lưu xong, dọn dẹp canvas để sẵn sàng chụp bài tiếp theo
+    if(!$('btnResumeCam').hidden) {
+        msg('Đã lưu bảng điểm thành công.', 'ok');
+    }
   };
   
   $('kqBox').onclick = e => {
@@ -295,26 +310,153 @@
   $('fMon').onchange =$('fQ').oninput = render;
   $('tb').onclick = e => { const i = e.target.dataset.i; if (i === undefined) return; kq.splice(+i, 1); SV('phieu.kq', kq); render(); };$('btnClr').onclick = () => { if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { kq = []; SV('phieu.kq', kq); render(); } };
 
-  // ===== SỬA LỖI CAMERA (Đã được bổ sung) =====
+  // =========================================================================
+  // XỬ LÝ CAMERA VÀ CHỤP ẢNH TÍCH HỢP
+  // =========================================================================
+  const video = $('video');
+  const canvasOut = $('out');
+  const ctxOut = canvasOut.getContext('2d', { willReadFrequently: true });
+  let streamTrack = null;
+
+  // 1. Bật camera
   $('btnStart').onclick = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } // Dùng camera sau trên điện thoại
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
       });
-      const video = $('video');
       video.srcObject = stream;
+      streamTrack = stream.getTracks()[0];
       await video.play();
+      
+      video.hidden = false;
+      canvasOut.hidden = true;
+      $('guide-box').hidden = false;
       $('btnScan').disabled = false; 
-      $('status').textContent = 'Camera đã bật thành công.';
+      $('btnResumeCam').hidden = true;
+      $('status').textContent = 'Camera đã bật thành công. Hãy đưa phiếu vào khung.';
       $('status').className = 'ok';
     } catch (err) {
       $('status').textContent = 'Lỗi camera: ' + err.message;
       $('status').className = 'err';
-      alert('Không thể bật camera. Hãy đảm bảo bạn đã cấp quyền và trang web đang chạy trên HTTPS (hoặc localhost).');
+      alert('Không thể bật camera. Hãy đảm bảo bạn đã cấp quyền thiết bị.');
     }
   };
-  // ===========================================
 
+  // 2. Chụp, đối chiếu và vẽ lên ảnh
+  $('btnScan').onclick = () => {
+    const kd = keys[keyId()];
+    if (!kd) {
+        msg('Chưa có đáp án (Key) cho môn và mã đề này!', 'err');
+        return go('cai');
+    }
+
+    // Lấy khung hình từ video
+    canvasOut.width = video.videoWidth;
+    canvasOut.height = video.videoHeight;
+    ctxOut.drawImage(video, 0, 0, canvasOut.width, canvasOut.height);
+    
+    // Tạm dừng hiển thị video, hiển thị ảnh đã chụp
+    video.hidden = true;
+    canvasOut.hidden = false;
+    $('guide-box').hidden = true; // Ẩn viền trắng hướng dẫn
+    $('btnResumeCam').hidden = false; // Hiện nút quay lại camera
+    $('btnScan').disabled = true;
+
+    // ---------------------------------------------------------------------
+    // GIẢ LẬP NHẬN DIỆN ẢNH (Vì không có OpenCV thực tế ở đây)
+    // Trong thực tế, bạn gọi hàm nhận diện từ script.js (ví dụ: chamBaiThiOpenCV(canvasOut))
+    // ---------------------------------------------------------------------
+    
+    // Dữ liệu GIẢ LẬP kết quả học sinh làm bài
+    const mockStudentAns = {
+        sbd: "0101001",
+        ma: $('inMa').value.trim() || "101",
+        p1: kd.p1.substring(0, 5) + "ABCD".repeat(10), // Trúng 5 câu đầu
+        p2: kd.p2.substring(0, 4) + " ĐSĐS SSSS",      // Trúng 1 câu
+        p3: kd.p3                                      // Trúng hết phần 3
+    };
+
+    // Điền dữ liệu vào form HTML ẩn để hàm chấm điểm nội tại có thể đọc
+    window.Phieu.nhap(mockStudentAns);
+
+    // Chấm điểm
+    const m = mon();
+    const parsedAns = parse($('aP1').value, $('aP2').value, $('aP3').value);
+    const parsedKey = parse(kd.p1, kd.p2, kd.p3);
+    const ketQua = cham(m, parsedKey, parsedAns);
+    const tongDiem = r2(ketQua.s1 + ketQua.s2 + ketQua.s3);
+
+    // Vẽ kết quả trực quan lên ảnh
+    veKetQuaLenAnh(tongDiem, ketQua);
+
+    msg('Đã chụp và chấm xong. Kiểm tra thông tin trước khi Lưu.', 'ok');
+  };
+
+  // Nút Quét tiếp bài khác
+  $('btnResumeCam').onclick = () => {
+      video.hidden = false;
+      canvasOut.hidden = true;
+      $('guide-box').hidden = false;
+      $('btnScan').disabled = false;
+      $('btnResumeCam').hidden = true;
+      
+      // Xóa form tạm
+      ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = '');
+      upd();
+      $('kqBox').hidden = true;
+  };
+
+  // Hàm vẽ điểm và thông báo lên Canvas
+  function veKetQuaLenAnh(tongDiem, ketQua) {
+      // 1. Phủ mờ nhẹ để chữ hiển thị rõ
+      ctxOut.fillStyle = "rgba(0, 0, 0, 0.4)";
+      ctxOut.fillRect(0, 0, canvasOut.width, canvasOut.height);
+
+      const isMobile = canvasOut.width < 600;
+      const fontSizeBig = isMobile ? 40 : 80;
+      const fontSizeSmall = isMobile ? 20 : 35;
+      const paddingX = isMobile ? 20 : 50;
+      
+      // 2. Vẽ Tổng Điểm
+      ctxOut.font = `bold ${fontSizeBig}px 'Be Vietnam Pro', sans-serif`;
+      ctxOut.fillStyle = "#ffd84d"; // Vàng
+      ctxOut.strokeStyle = "#14213d"; // Viền chữ đen
+      ctxOut.lineWidth = isMobile ? 3 : 5;
+      
+      const textDiem = `ĐIỂM: ${tongDiem.toLocaleString('vi-VN')}/10`;
+      ctxOut.strokeText(textDiem, paddingX, paddingX + fontSizeBig);
+      ctxOut.fillText(textDiem, paddingX, paddingX + fontSizeBig);
+
+      // 3. Vẽ điểm thành phần
+      ctxOut.font = `bold ${fontSizeSmall}px 'Be Vietnam Pro', sans-serif`;
+      ctxOut.fillStyle = "#ffffff"; // Trắng
+      const textTp = `PI: ${r2(ketQua.s1)}đ | PII: ${r2(ketQua.s2)}đ | PIII: ${r2(ketQua.s3)}đ`;
+      ctxOut.strokeText(textTp, paddingX, paddingX + fontSizeBig + fontSizeSmall + 10);
+      ctxOut.fillText(textTp, paddingX, paddingX + fontSizeBig + fontSizeSmall + 10);
+
+      // 4. Vẽ chú thích mô phỏng (Xanh đúng/ Đỏ sai)
+      ctxOut.font = `${isMobile?16:24}px Arial`;
+      
+      ctxOut.fillStyle = "#22c55e"; // Xanh
+      ctxOut.fillText("O Vòng xanh: Đáp án đúng (Mô phỏng)", paddingX, canvasOut.height - (isMobile?60:100));
+      
+      ctxOut.fillStyle = "#ef4444"; // Đỏ
+      ctxOut.fillText("X Vòng đỏ: Đáp án sai (Mô phỏng)", paddingX, canvasOut.height - (isMobile?30:50));
+
+      /* LƯU Ý KHI GẮN OPENCV THẬT:
+       * Thay vì in text mô phỏng ở trên, bạn sẽ nhận được mảng tọa độ các ô (x, y). 
+       * Bạn có thể dùng hàm dưới đây để khoanh tròn ô đáp án:
+       * 
+       * ctxOut.beginPath();
+       * ctxOut.arc(x, y, radius, 0, 2 * Math.PI);
+       * ctxOut.lineWidth = 4;
+       * ctxOut.strokeStyle = isCorrect ? "#22c55e" : "#ef4444";
+       * ctxOut.stroke();
+       */
+  }
+  // =========================================================================
+
+  // Các chức năng xuất / nhập Excel
   $('btnXls').onclick = () => {
     if (!kq.length) return msg('Chưa có bài nào để xuất.', 'err');
     if (!window.XLSX) return msg('Chưa tải được thư viện Excel. Kiểm tra mạng rồi thử lại.', 'err');
@@ -333,12 +475,9 @@
     XLSX.writeFile(wb, 'diem-trac-nghiem-' + new Date().toISOString().slice(0, 10) + '.xlsx');
   };
 
-  // ===== CHỨC NĂNG XUẤT / NHẬP EXCEL MẪU =====
   $('btnXlsMau').onclick = () => {
-    if (!window.XLSX) return msg('Chưa tải được thư viện Excel. Vui lòng kiểm tra mạng.', 'err');
-    const ws = XLSX.utils.aoa_to_sheet([
-      ['STT', 'SBD', 'Họ và tên', 'Lớp', 'Phần I', 'Phần II', 'Phần III', 'Tổng điểm']
-    ]);
+    if (!window.XLSX) return msg('Chưa tải được thư viện Excel.', 'err');
+    const ws = XLSX.utils.aoa_to_sheet([['STT', 'SBD', 'Họ và tên', 'Lớp', 'Phần I', 'Phần II', 'Phần III', 'Tổng điểm']]);
     ws['!cols'] = [5, 12, 25, 10, 10, 10, 10, 12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Danh_Sach_Mau');
@@ -353,68 +492,34 @@
     const reader = new FileReader();
     reader.onload = evt => {
       try {
-        const data = new Uint8Array(evt.target.result);
-        const wb = XLSX.read(data, {type: 'array'});
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws);
+        const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         
-        let rosterText = '';
-        let countDs = 0, countDiem = 0;
+        let rosterText = '', countDs = 0, countDiem = 0;
 
         rows.forEach(r => {
-          if (!r) return; // Bỏ qua nếu dòng rỗng
+          if (!r) return;
           const keys = Object.keys(r);
-          
-          const getVal = (kws) => {
-            const key = keys.find(k => kws.some(kw => k.toLowerCase().includes(kw)));
-            return key && r[key] !== undefined ? String(r[key]).trim() : '';
-          };
+          const getVal = (kws) => { const key = keys.find(k => kws.some(kw => k.toLowerCase().includes(kw))); return key && r[key] !== undefined ? String(r[key]).trim() : ''; };
 
-          const sbd = getVal(['sbd', 'báo danh']);
-          const ten = getVal(['họ và tên', 'họ tên', 'tên']);
-          const lop = getVal(['lớp']);
-          
-          if (sbd || ten) {
-            rosterText += `${sbd}\t${ten}\t${lop}\n`;
-            countDs++;
-          }
+          const sbd = getVal(['sbd', 'báo danh']), ten = getVal(['họ và tên', 'họ tên', 'tên']), lop = getVal(['lớp']);
+          if (sbd || ten) { rosterText += `${sbd}\t${ten}\t${lop}\n`; countDs++; }
 
-          const p1 = parseFloat(getVal(['phần i', 'phần 1']));
-          const p2 = parseFloat(getVal(['phần ii', 'phần 2']));
-          const p3 = parseFloat(getVal(['phần iii', 'phần 3']));
-          const tong = parseFloat(getVal(['tổng']));
-
+          const p1 = parseFloat(getVal(['phần i', 'phần 1'])), p2 = parseFloat(getVal(['phần ii', 'phần 2'])), p3 = parseFloat(getVal(['phần iii', 'phần 3'])), tong = parseFloat(getVal(['tổng']));
           if (!isNaN(tong)) {
-            kq.push({
-              sbd: sbd || '', ten: ten || '', lop: lop || '',
-              mon: mon().ten, ma: $('inMa').value.trim() || '',
-              s1: isNaN(p1) ? 0 : p1, s2: isNaN(p2) ? 0 : p2, s3: isNaN(p3) ? 0 : p3,
-              tong: tong, dung: 0 
-            });
+            kq.push({ sbd: sbd || '', ten: ten || '', lop: lop || '', mon: mon().ten, ma: $('inMa').value.trim() || '', s1: isNaN(p1) ? 0 : p1, s2: isNaN(p2) ? 0 : p2, s3: isNaN(p3) ? 0 : p3, tong: tong, dung: 0 });
             countDiem++;
           }
         });
 
-        if (countDs > 0) {
-          const oldText = $('roster').value.trim();$('roster').value = (oldText ? oldText + '\n' : '') + rosterText.trim();
-          $('roster').oninput();
-        }
-
-        if (countDiem > 0) {
-          SV('phieu.kq', kq);
-          render();
-        }
-
+        if (countDs > 0) { const oldText = $('roster').value.trim(); $('roster').value = (oldText ? oldText + '\n' : '') + rosterText.trim(); $('roster').oninput(); }
+        if (countDiem > 0) { SV('phieu.kq', kq); render(); }
         msg(`Đã nhập thành công ${countDs} học sinh${countDiem > 0 ? ` và ${countDiem} điểm` : ''}.`, 'ok');
-      } catch (err) {
-        msg('Lỗi đọc file Excel: File bị hỏng hoặc không đúng chuẩn.', 'err');
-        console.error(err);
-      }
-      e.target.value = ''; // Xoá file trong input để lần sau chọn lại vẫn trigger onchange
+      } catch (err) { msg('Lỗi đọc file Excel.', 'err'); console.error(err); }
+      e.target.value = '';
     };
     reader.readAsArrayBuffer(file);
   };
-  // ===========================================
 
   window.Phieu = {
     mau: () => radio('mau'),
@@ -433,6 +538,5 @@
   drawMau(); drawMon(); rosterN(); refresh(); render(); go(keys[keyId()] ? 'quet' : 'cai');
 })();
 </script>
-<script src="script.js"></script>
 </body>
 </html>
