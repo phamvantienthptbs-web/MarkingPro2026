@@ -93,8 +93,13 @@
     <label id="rk3"><span class="lb">Phần III: cách nhau, dùng dấu phẩy thập phân <b class="cn" id="hk3"></b></span><input id="kP3" placeholder="12,5 -3 0,75…" autocomplete="off"></label>
     <div class="row"><button id="btnKey" type="button">Lưu đáp án</button></div></fieldset>
   <fieldset><legend>5. Danh sách lớp <span id="rosterN" class="badge"></span></legend>
-    <label><span class="lb">Dán từ Excel hoặc gõ: SBD, Họ và tên, Lớp (mỗi dòng một học sinh). Gõ SBD sẽ tự điền họ tên.</span>
-    <textarea id="roster" placeholder="0101001	Nguyễn Văn An	12A1"></textarea></label></fieldset>
+    <div class="row" style="margin-top:0; margin-bottom:8px">
+      <button id="btnXlsMau" type="button" class="alt" style="padding:8px">Tải Excel mẫu</button>
+      <label class="file" style="padding:8px; margin:0">Nhập Excel<input id="fileXlsIn" type="file" accept=".xlsx, .xls"></label>
+    </div>
+    <label><span class="lb">Dán text hoặc nhập từ file Excel (SBD, Họ tên, Lớp).</span>
+    <textarea id="roster" placeholder="0101001	Nguyễn Văn An	12A1"></textarea></label>
+  </fieldset>
 </section>
 
 <!-- ============ QUÉT ============ -->
@@ -104,9 +109,7 @@
   <div class="row"><label class="file" style="margin:0">Chọn ảnh có sẵn<input id="file" type="file" accept="image/*"></label></div>
   <div id="status" role="status" aria-live="polite">Đang tải OpenCV.js…</div>
 
-  <!-- Canvas ẩn: khung hình chụp từ video được vẽ vào đây để OpenCV đọc (cv.imread) -->
   <canvas id="cap" hidden></canvas>
-  <!-- Canvas hiển thị phiếu đã nắn phẳng + vòng tròn ROI: dùng để tinh chỉnh tọa độ -->
   <canvas id="out" hidden></canvas>
   <pre id="result" hidden></pre>
   <small>Đặt cả tờ phiếu trong khung nét đứt, nền tối, đủ sáng, giữ máy thẳng. Vòng xanh = ô được nhận là đã tô; vòng đỏ = ô trống.</small>
@@ -156,8 +159,6 @@
   const SV = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const esc = s => String(s).replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) + ';');
 
-  // ===== CẤU HÌNH: sửa tại đây cho khớp phiếu và cấu trúc đề thực tế =====
-  // ph: số phần có trên phiếu. n: [số câu phần I, II, III]. p3: điểm mỗi câu phần III. Phần I: 0,25 điểm/câu.
   const MAU = {
     a: { ten: 'THPT 2026 – 3 phần', mota: 'Phần I, II và III', ph: 3 },
     b: { ten: 'Chỉ phần I', mota: 'Một lựa chọn A–D (vd: Ngoại ngữ)', ph: 1 }
@@ -171,8 +172,7 @@
     su:   { ten: 'Lịch sử', n: [24, 4, 0], p3: 0 },
     nn:   { ten: 'Ngoại ngữ', n: [40, 0, 0], p3: 0 }
   };
-  const P2 = [0, .1, .25, .5, 1]; // điểm phần II theo số ý đúng trong câu
-  // =====================================================================
+  const P2 = [0, .1, .25, .5, 1]; 
 
   let keys = LS('phieu.key', {}), kq = LS('phieu.kq', []), lastRec = null, tm;
   const radio = n => (Q(`input[name=${n}]:checked`) || {}).value;
@@ -205,12 +205,11 @@
   function hint(p, r, a, b, c) {
     const m = mon(), n = cnt(a, b, c);
     [0, 1, 2].forEach(i => {
-      $(r + (i + 1)).hidden = !m.n[i];
-      $(p + (i + 1)).textContent = m.n[i] ? `${n[i]}/${m.n[i]} câu` : '';
+      $(r + (i + 1)).hidden = !m.n[i];$(p + (i + 1)).textContent = m.n[i] ? `${n[i]}/${m.n[i]} câu` : '';
       $(p + (i + 1)).className = 'cn ' + (n[i] === m.n[i] ? 'ok' : n[i] ? 'bad' : '');
     });
   }
-  const upd = () => { hint('hk', 'rk', $('kP1').value, $('kP2').value, $('kP3').value); hint('ha', 'ra', $('aP1').value, $('aP2').value, $('aP3').value); };
+  const upd = () => { hint('hk', 'rk', $('kP1').value, $('kP2').value, $('kP3').value); hint('ha', 'ra',$('aP1').value, $('aP2').value, $('aP3').value); };
   ['kP1', 'kP2', 'kP3', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).addEventListener('input', upd));
 
   function refresh() {
@@ -220,10 +219,9 @@
     $('ctx').innerHTML = `<b>${m.ten}</b> · Mã ${esc($('inMa').value.trim() || '—')} · <em class="${ok ? 'ok' : 'bad'}">${ok ? 'đã có đáp án' : 'chưa có đáp án'}</em>`;
     upd();
   }
-  $('mauBox').onchange = () => { SV('phieu.mau', radio('mau')); drawMon(); refresh(); };
-  $('monBox').onchange = () => { SV('phieu.mon', radio('mon')); refresh(); };
-  $('inMa').oninput = () => { SV('phieu.ma', $('inMa').value); refresh(); };
-  $('roster').oninput = () => { SV('phieu.ds', $('roster').value); rosterN(); };
+  $('mauBox').onchange = () => { SV('phieu.mau', radio('mau')); drawMon(); refresh(); };$('monBox').onchange = () => { SV('phieu.mon', radio('mon')); refresh(); };
+  $('inMa').oninput = () => { SV('phieu.ma',$('inMa').value); refresh(); };
+  $('roster').oninput = () => { SV('phieu.ds',$('roster').value); rosterN(); };
   const rosterN = () => { const n = $('roster').value.split('\n').filter(l => l.trim()).length; $('rosterN').textContent = n ? n + ' học sinh' : 'tùy chọn'; };
 
   const parse = (a, b, c) => ({
@@ -253,7 +251,7 @@
     const s = $('inSbd').value.trim(); if (!s) return;
     for (const line of $('roster').value.split('\n')) {
       const [a, b, c] = line.split(/\t|,|;/).map(x => x.trim());
-      if (a === s) { $('inTen').value = b || ''; $('inLop').value = c || ''; return; }
+      if (a === s) { $('inTen').value = b \vert{}\vert{} '';$('inLop').value = c || ''; return; }
     }
   };
 
@@ -263,12 +261,12 @@
     const ten = $('inTen').value.trim();
     if (!ten) { $('inTen').focus(); return msg('Nhập họ và tên thí sinh trước khi lưu.', 'err'); }
     const s = cham(m, parse(kd.p1, kd.p2, kd.p3), parse($('aP1').value, $('aP2').value, $('aP3').value));
-    const r = lastRec = { sbd: $('inSbd').value.trim(), ten, lop: $('inLop').value.trim(), mon: m.ten, ma: $('inMa').value.trim(),
+    const r = lastRec = { sbd: $('inSbd').value.trim(), ten, lop: $('inLop').value.trim(), mon: m.ten, ma:$('inMa').value.trim(),
       s1: r2(s.s1), s2: r2(s.s2), s3: r2(s.s3), tong: r2(s.s1 + s.s2 + s.s3), dung: s.d };
     kq.push(r); SV('phieu.kq', kq); render();
     $('kqBox').hidden = false;
     $('kqBox').innerHTML = `<div class="big">${f(r.tong)}<small>/10</small></div><div><b>${esc(ten)}</b><br><small>Phần I ${f(r.s1)} · II ${f(r.s2)} · III ${f(r.s3)}</small></div><button type="button" class="alt" id="btnUndo">Hoàn tác</button>`;
-    ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = ''); upd(); $('dAns').open = false;
+    ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = ''); upd();$('dAns').open = false;
   };
   $('kqBox').onclick = e => {
     if (e.target.id !== 'btnUndo' || kq[kq.length - 1] !== lastRec) return;
@@ -276,11 +274,10 @@
   };
 
   function render() {
-    const fm = $('fMon').value, q = $('fQ').value.trim().toLowerCase();
-    $('fMon').innerHTML = '<option value="">Tất cả môn</option>' + [...new Set(kq.map(r => r.mon))].map(m => `<option${m === fm ? ' selected' : ''}>${esc(m)}</option>`).join('');
+    const fm = $('fMon').value, q = $('fQ').value.trim().toLowerCase();$('fMon').innerHTML = '<option value="">Tất cả môn</option>' + [...new Set(kq.map(r => r.mon))].map(m => `<option${m === fm ? ' selected' : ''}>${esc(m)}</option>`).join('');
     const v = kq.map((r, i) => ({ ...r, i })).filter(r => (!fm || r.mon === fm) && (!q || (r.ten + ' ' + r.sbd).toLowerCase().includes(q)));
     const t = v.map(r => r.tong), n = t.length;
-    $('cnt').textContent = kq.length || ''; $('sN').textContent = n;
+    $('cnt').textContent = kq.length \vert{}\vert{} '';$('sN').textContent = n;
     $('sAvg').textContent = n ? f(t.reduce((a, b) => a + b, 0) / n) : '–';
     $('sMax').textContent = n ? f(Math.max(...t)) : '–'; $('sMin').textContent = n ? f(Math.min(...t)) : '–';
     const b = Array(10).fill(0); t.forEach(x => b[Math.min(9, Math.floor(x))]++);
@@ -292,9 +289,8 @@
       <td><button type="button" data-i="${r.i}" aria-label="Xóa bài của ${esc(r.ten)}">×</button></td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">Chưa có bài nào. Sang tab Quét, chấm bài đầu tiên rồi quay lại đây.</td></tr>';
   }
-  $('fMon').onchange = $('fQ').oninput = render;
-  $('tb').onclick = e => { const i = e.target.dataset.i; if (i === undefined) return; kq.splice(+i, 1); SV('phieu.kq', kq); render(); };
-  $('btnClr').onclick = () => { if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { kq = []; SV('phieu.kq', kq); render(); } };
+  $('fMon').onchange =$('fQ').oninput = render;
+  $('tb').onclick = e => { const i = e.target.dataset.i; if (i === undefined) return; kq.splice(+i, 1); SV('phieu.kq', kq); render(); };$('btnClr').onclick = () => { if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { kq = []; SV('phieu.kq', kq); render(); } };
 
   $('btnXls').onclick = () => {
     if (!kq.length) return msg('Chưa có bài nào để xuất.', 'err');
@@ -314,9 +310,86 @@
     XLSX.writeFile(wb, 'diem-trac-nghiem-' + new Date().toISOString().slice(0, 10) + '.xlsx');
   };
 
-  // ===== Cầu nối với script.js (bộ quét OpenCV) =====
-  // Sau khi quét xong, gọi: Phieu.nhap({ p1:'ABCD-…', p2:['ĐSĐS','SSĐ-',…], p3:['12,5','-3',…], sbd:'0101001' })
-  // Phieu.mau() trả về 'a' | 'b' để script.js chọn bộ tọa độ ROI; Phieu.mon() trả về cấu hình môn { n:[…] }.
+  // ===== Chức năng bổ sung: Xuất / Nhập Excel Mẫu =====
+  $('btnXlsMau').onclick = () => {
+    if (!window.XLSX) return msg('Chưa tải được thư viện Excel. Vui lòng kiểm tra mạng.', 'err');
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['STT', 'SBD', 'Họ và tên', 'Lớp', 'Phần I', 'Phần II', 'Phần III', 'Tổng điểm']
+    ]);
+    ws['!cols'] = [5, 12, 25, 10, 10, 10, 10, 12].map(wch => ({ wch }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Danh_Sach_Mau');
+    XLSX.writeFile(wb, 'Danh_Sach_Hoc_Sinh_Mau.xlsx');
+  };
+
+  $('fileXlsIn').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!window.XLSX) return msg('Chưa tải được thư viện Excel.', 'err');
+    
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const wb = XLSX.read(data, {type: 'array'});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws);
+        
+        let rosterText = '';
+        let countDs = 0, countDiem = 0;
+
+        rows.forEach(r => {
+          const keys = Object.keys(r);
+          const getVal = (kws) => {
+            const key = keys.find(k => kws.some(kw => k.toLowerCase().includes(kw)));
+            return key ? String(r[key]).trim() : '';
+          };
+
+          const sbd = getVal(['sbd', 'báo danh']);
+          const ten = getVal(['họ và tên', 'họ tên', 'tên']);
+          const lop = getVal(['lớp']);
+          
+          if (sbd || ten) {
+            rosterText += `${sbd}\t${ten}\t${lop}\n`;
+            countDs++;
+          }
+
+          const p1 = parseFloat(getVal(['phần i', 'phần 1']));
+          const p2 = parseFloat(getVal(['phần ii', 'phần 2']));
+          const p3 = parseFloat(getVal(['phần iii', 'phần 3']));
+          const tong = parseFloat(getVal(['tổng']));
+
+          if (!isNaN(tong)) {
+            kq.push({
+              sbd: sbd || '', ten: ten || '', lop: lop || '',
+              mon: mon().ten, ma: $('inMa').value.trim() || '',
+              s1: isNaN(p1) ? 0 : p1, s2: isNaN(p2) ? 0 : p2, s3: isNaN(p3) ? 0 : p3,
+              tong: tong, dung: 0 
+            });
+            countDiem++;
+          }
+        });
+
+        if (countDs > 0) {
+          const oldText = $('roster').value.trim();$('roster').value = (oldText ? oldText + '\n' : '') + rosterText.trim();
+          $('roster').oninput();
+        }
+
+        if (countDiem > 0) {
+          SV('phieu.kq', kq);
+          render();
+        }
+
+        msg(`Đã nhập thành công ${countDs} học sinh${countDiem > 0 ? ` và ${countDiem} bản ghi điểm` : ''}.`, 'ok');
+      } catch (err) {
+        msg('Lỗi đọc file Excel: File không đúng định dạng.', 'err');
+      }
+      e.target.value = ''; 
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  // ====================================================
+
   window.Phieu = {
     mau: () => radio('mau'),
     mon: () => mon(),
@@ -326,11 +399,11 @@
       if (a.p3 != null) $('aP3').value = [].concat(a.p3).join(' ');
       if (a.sbd) { $('inSbd').value = a.sbd; $('inSbd').oninput(); }
       if (a.ma) { $('inMa').value = a.ma; $('inMa').oninput(); }
-      upd(); $('kqBox').hidden = true; $('dAns').open = true; go('quet'); $('hs').scrollIntoView({ behavior: 'smooth' });
+      upd(); $('kqBox').hidden = true; $('dAns').open = true; go('quet');$('hs').scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  $('inMa').value = LS('phieu.ma', ''); $('roster').value = LS('phieu.ds', '');
+  $('inMa').value = LS('phieu.ma', '');$('roster').value = LS('phieu.ds', '');
   drawMau(); drawMon(); rosterN(); refresh(); render(); go(keys[keyId()] ? 'quet' : 'cai');
 })();
 </script>
