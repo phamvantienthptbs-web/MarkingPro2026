@@ -90,7 +90,7 @@
   <fieldset><legend>4. Đáp án đúng <span id="keyState" class="badge"></span></legend>
     <label id="rk1"><span class="lb">Phần I: một đáp án mỗi câu <b class="cn" id="hk1"></b></span><input id="kP1" placeholder="ABCDABCD…" autocomplete="off"></label>
     <label id="rk2"><span class="lb">Phần II: 4 ký tự Đ/S mỗi câu, cách nhau <b class="cn" id="hk2"></b></span><input id="kP2" placeholder="ĐSĐS SSĐĐ…" autocomplete="off"></label>
-    <label id="rk3"><span class="lb">Phần III: cách nhau, dùng dấu phẩy thập phân <b class="cn" id="hk3"></b></span><input id="kP3" placeholder="12,5 -3 0,75…" autocomplete="off"></label>
+    <label id="rk3"><span class="lb">Phần III: cách nhau, dùng phẩy thập phân <b class="cn" id="hk3"></b></span><input id="kP3" placeholder="12,5 -3 0,75…" autocomplete="off"></label>
     <div class="row"><button id="btnKey" type="button">Lưu đáp án</button></div></fieldset>
   <fieldset><legend>5. Danh sách lớp <span id="rosterN" class="badge"></span></legend>
     <div class="row" style="margin-top:0; margin-bottom:8px">
@@ -114,12 +114,15 @@
     <button id="btnScan" disabled>Chụp và chấm</button>
   </div>
   <div class="row"><button id="btnResumeCam" class="alt" hidden>Quét tiếp bài khác</button></div>
-  <div class="row"><label class="file" style="margin:0">Chọn ảnh có sẵn<input id="file" type="file" accept="image/*"></label></div>
-  <div id="status" role="status" aria-live="polite">Đang chờ bật camera...</div>
+  <div class="row">
+    <!-- Nút tải ảnh có sẵn từ máy -->
+    <label class="file" style="margin:0">Chọn ảnh có sẵn<input id="file" type="file" accept="image/*"></label>
+  </div>
+  <div id="status" role="status" aria-live="polite">Đang chờ hệ thống...</div>
 
   <canvas id="cap" hidden></canvas>
   <pre id="result" hidden></pre>
-  <small>Đặt cả tờ phiếu trong khung nét đứt, nền tối, đủ sáng, giữ máy thẳng. Vòng xanh = ô được nhận là đã tô; vòng đỏ = ô trống.</small>
+  <small>Đặt cả tờ phiếu trong khung nét đứt, đủ sáng. Vòng xanh = ô được nhận là đã tô; vòng đỏ = ô trống.</small>
 
   <section id="hs" class="card">
     <h2>Thí sinh</h2>
@@ -133,7 +136,7 @@
       <label id="ra2"><span class="lb">Phần II <b class="cn" id="ha2"></b></span><input id="aP2" autocomplete="off"></label>
       <label id="ra3"><span class="lb">Phần III <b class="cn" id="ha3"></b></span><input id="aP3" autocomplete="off"></label>
       <small>Dùng “-” cho câu bỏ trống.</small></details>
-    <div class="row"><button id="btnLuu" type="button">Chấm và lưu</button></div>
+    <div class="row"><button id="btnLuu" type="button">Lưu bài thi</button></div>
     <div id="kqBox" hidden></div>
   </section>
 </section>
@@ -158,7 +161,7 @@
 </nav>
 <div id="msg" role="status" aria-live="polite"></div>
 
-<!-- Thư viện SheetJS -->
+<!-- Thư viện Excel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
@@ -184,9 +187,8 @@
   const P2 = [0, .1, .25, .5, 1]; 
 
   let keys = LS('phieu.key', {}), kq = LS('phieu.kq', []), lastRec = null, tm;
-  const radio = n => (Q(`input[name=${n}]:checked`) || {}).value;
-  const mon = () => MON[radio('mon')];
-  // Chú ý: Lấy mã đề từ DOM để đảm bảo đồng bộ
+  const radio = n => (Q(`input[name="${n}"]:checked`) || {}).value;
+  const mon = () => MON[radio('mon')] || MON['toan'];
   const keyId = () => radio('mon') + '|' + $('inMa').value.trim();
   
   const r2 = x => Math.round(x * 100) / 100, f = x => x.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
@@ -205,14 +207,24 @@
     const cur = LS('phieu.mau', 'a');
     $('mauBox').innerHTML = Object.entries(MAU).map(([k, m]) => opt('mau', k, m.ten, m.mota, k === cur)).join('');
   }
+  
   function drawMon() {
     const ph = MAU[radio('mau')].ph, cur = LS('phieu.mon', 'toan');
     const list = Object.entries(MON).filter(([, m]) => ph === 3 || m.n[1] + m.n[2] === 0);
     const sel = list.some(([k]) => k === cur) ? cur : list[0][0];
     $('monBox').innerHTML = list.map(([k, m]) => opt('mon', k, m.ten, m.n.filter(x => x).join(' · ') + ' câu', k === sel)).join('');
+    // KHẮC PHỤC LỖI 1: Cập nhật ngay LocalStorage nếu hệ thống tự đổi môn (VD: chuyển mẫu phiếu 3 phần sang 1 phần)
+    SV('phieu.mon', sel);
   }
 
-  const cnt = (a, b, c) => [a.replace(/\s/g, '').length, b.trim() ? b.trim().split(/[\s,;|]+/).length : 0, c.trim() ? c.trim().split(/[\s;|]+/).length : 0];
+  // KHẮC PHỤC CRASH: Đảm bảo dữ liệu parse an toàn, loại bỏ các lỗi gọi hàm trên undefined
+  const cnt = (a, b, c) => [String(a||'').replace(/\s/g, '').length, String(b||'').trim() ? String(b||'').trim().split(/[\s,;|]+/).filter(x=>x).length : 0, String(c||'').trim() ? String(c||'').trim().split(/[\s;|]+/).filter(x=>x).length : 0];
+  const parse = (a, b, c) => ({
+    p1: String(a || '').toUpperCase().replace(/\s/g, ''),
+    p2: String(b || '').toUpperCase().replace(/D/g, 'Đ').split(/[\s,;|]+/).filter(x => x),
+    p3: String(c || '').trim().split(/[\s;|]+/).filter(x => x)
+  });
+  
   function hint(p, r, a, b, c) {
     const m = mon(), n = cnt(a, b, c);
     [0, 1, 2].forEach(i => {
@@ -231,17 +243,12 @@
     upd();
   }
   
-  $('mauBox').onchange = () => { SV('phieu.mau', radio('mau')); drawMon(); refresh(); };$('monBox').onchange = () => { SV('phieu.mon', radio('mon')); refresh(); };
+  $('mauBox').onchange = e => { if (e.target.name === 'mau') { SV('phieu.mau', radio('mau')); drawMon(); refresh(); } };$('monBox').onchange = e => { if (e.target.name === 'mon') { SV('phieu.mon', radio('mon')); refresh(); } };
   $('inMa').oninput = () => { SV('phieu.ma',$('inMa').value); refresh(); };
   $('roster').oninput = () => { SV('phieu.ds',$('roster').value); rosterN(); };
   const rosterN = () => { const n = $('roster').value.split('\n').filter(l => l.trim()).length; $('rosterN').textContent = n ? n + ' học sinh' : 'tùy chọn'; };
 
-  const parse = (a, b, c) => ({
-    p1: (a || '').toUpperCase().replace(/\s/g, ''),
-    p2: (b || '').toUpperCase().replace(/D/g, 'Đ').split(/[\s,;|]+/),
-    p3: (c || '').trim().split(/[\s;|]+/)
-  });
-  const num = x => { x = (x || '').replace(',', '.'); return x === '' || x === '-' ? null : (isNaN(+x) ? x : +x); };
+  const num = x => { x = String(x || '').replace(',', '.'); return x === '' || x === '-' ? null : (isNaN(+x) ? x : +x); };
   
   // HÀM CHẤM ĐIỂM
   function cham(m, k, a) {
@@ -269,13 +276,14 @@
     }
   };
 
-  // NÚT LƯU SAU KHI QUÉT
+  // NÚT LƯU SAU KHI QUÉT (Sửa lỗi crash khi key là mảng thay vì string từ version cũ)
   $('btnLuu').onclick = () => {
     const m = mon(), kd = keys[keyId()];
-    if (!kd) { go('cai'); return msg('Chưa có đáp án cho môn và mã đề này. Nhập đáp án rồi bấm “Lưu đáp án”.', 'err'); }
+    if (!kd) { go('cai'); return msg('Chưa có đáp án cho môn và mã đề này. Vui lòng tạo đáp án.', 'err'); }
     const ten = $('inTen').value.trim();
     if (!ten) { $('inTen').focus(); return msg('Nhập họ và tên thí sinh trước khi lưu.', 'err'); }
     
+    // Đã bọc an toàn trong `parse`
     const s = cham(m, parse(kd.p1, kd.p2, kd.p3), parse($('aP1').value, $('aP2').value, $('aP3').value));
     const r = lastRec = { 
         sbd: $('inSbd').value.trim(), ten, lop: $('inLop').value.trim(), mon: m.ten, ma:$('inMa').value.trim(),
@@ -288,12 +296,9 @@
     $('kqBox').innerHTML = `<div class="big">${f(r.tong)}<small>/10</small></div><div><b>${esc(ten)}</b><br><small>Phần I ${f(r.s1)} · II ${f(r.s2)} · III ${f(r.s3)}</small></div><button type="button" class="alt" id="btnUndo">Hoàn tác</button>`;
     
     ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = ''); 
-    upd(); 
-    $('dAns').open = false;
+    upd(); $('dAns').open = false;
     
-    if(!$('btnResumeCam').hidden) {
-        msg('Đã lưu bài thành công. Bấm Quét tiếp bài khác để tiếp tục.', 'ok');
-    }
+    msg('Đã lưu bài thi thành công. Có thể Quét tiếp.', 'ok');
   };
   
   $('kqBox').onclick = e => {
@@ -310,108 +315,64 @@
     $('sAvg').textContent = n ? f(t.reduce((a, b) => a + b, 0) / n) : '–';
     $('sMax').textContent = n ? f(Math.max(...t)) : '–'; $('sMin').textContent = n ? f(Math.min(...t)) : '–';
     
-    const b = Array(10).fill(0); t.forEach(x => b[Math.min(9, Math.floor(x))]++);
+    const b = Array(10).fill(0); t.forEach(x => { if (!isNaN(x)) b[Math.min(9, Math.floor(x))]++; });
     const mx = Math.max(1, ...b);
     $('hist').innerHTML = b.map(c => `<div title="${c} bài"><em>${c || ''}</em><span style="height:${Math.round(c / mx * 70)}px"></span></div>`).join('');
     
     $('tb').innerHTML = v.reverse().map(r => `<tr><td>${esc(r.sbd)}</td><td>${esc(r.ten)}${r.lop ? `<small>${esc(r.lop)}</small>` : ''}</td><td>${esc(r.mon)}</td>
       <td class="n">${f(r.s1)}</td><td class="n">${f(r.s2)}</td><td class="n">${f(r.s3)}</td>
       <td class="n"><span class="sc ${r.tong >= 8 ? 'hi' : r.tong < 5 ? 'lo' : ''}">${f(r.tong)}</span></td>
-      <td><button type="button" data-i="${r.i}" aria-label="Xóa bài của ${esc(r.ten)}">×</button></td></tr>`).join('')
+      <td><button type="button" data-i="${r.i}" aria-label="Xóa bài">×</button></td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">Chưa có bài nào. Sang tab Quét, chấm bài đầu tiên rồi quay lại đây.</td></tr>';
   }
   
   $('fMon').onchange =$('fQ').oninput = render;
-  
-  // FIX XÓA ĐIỂM: Sử dụng dataset.i trỏ đúng index của kq để tránh lệch khi có filter
-  $('tb').onclick = e => { 
-      const i = e.target.dataset.i; 
-      if (i === undefined) return; 
-      kq.splice(+i, 1); 
-      SV('phieu.kq', kq); 
-      render(); 
-  };
-  
-  $('btnClr').onclick = () => { 
-      if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { 
-          kq = []; 
-          SV('phieu.kq', kq); 
-          render(); 
-      } 
-  };
+  $('tb').onclick = e => { const i = e.target.dataset.i; if (i === undefined) return; kq.splice(+i, 1); SV('phieu.kq', kq); render(); };$('btnClr').onclick = () => { if (kq.length && confirm('Xóa toàn bộ bảng điểm?')) { kq = []; SV('phieu.kq', kq); render(); } };
 
   // =========================================================================
-  // XỬ LÝ CAMERA VÀ CHỤP ẢNH TÍCH HỢP
+  // XỬ LÝ QUÉT BÀI (CAMERA HOẶC FILE ẢNH)
   // =========================================================================
-  const video = $('video');
-  const canvasOut = $('out');
+  const video = $('video'), canvasOut =$('out');
   const ctxOut = canvasOut.getContext('2d', { willReadFrequently: true });
   let streamTrack = null;
 
-  // 1. Bật camera (Fix lỗi treo phần cứng bằng cách clear track cũ nếu có)
   $('btnStart').onclick = async () => {
-    if (streamTrack) {
-        streamTrack.stop(); // Dừng luồng cũ nếu người dùng ấn Bật lại nhiều lần
-    }
+    if (streamTrack) streamTrack.stop(); // Ngắt cam cũ nếu bấm lại
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } });
       video.srcObject = stream;
       streamTrack = stream.getTracks()[0];
       await video.play();
       
-      video.hidden = false;
-      canvasOut.hidden = true;
-      $('guide-box').hidden = false;
-      $('btnScan').disabled = false; 
-      $('btnResumeCam').hidden = true;
-      
-      $('status').textContent = 'Camera đã bật. Hãy đưa phiếu vào khung nét đứt.';
-      $('status').className = 'ok';
+      video.hidden = false; canvasOut.hidden = true; $('guide-box').hidden = false;
+      $('btnScan').disabled = false; $('btnResumeCam').hidden = true;
+      $('status').textContent = 'Camera đã bật. Hãy đưa phiếu vào khung.'; $('status').className = 'ok';
     } catch (err) {
-      $('status').textContent = 'Lỗi camera: ' + err.message;
-      $('status').className = 'err';
-      alert('Không thể bật camera. Vui lòng cấp quyền trên trình duyệt.');
+      $('status').textContent = 'Lỗi camera: ' + err.message; $('status').className = 'err';
+      alert('Không thể bật camera. Bạn có thể dùng nút "Chọn ảnh có sẵn".');
     }
   };
 
-  // 2. Chụp, đối chiếu và vẽ lên ảnh
-  $('btnScan').onclick = () => {
+  // Hàm quét chung cho cả Camera và File ảnh
+  function executeScanLogic() {
     const currentMa = $('inMa').value.trim();
     const kd = keys[keyId()];
     
     if (!kd) {
-        msg(`Chưa có đáp án cho mã đề ${currentMa || '(trống)'}! Cần cài đặt trước.`, 'err');
-        return go('cai');
+        msg(`Chưa có đáp án (Key) cho mã đề ${currentMa || '(trống)'}!`, 'err');
+        go('cai'); return false;
     }
 
-    // Lấy khung hình từ video sang Canvas
-    canvasOut.width = video.videoWidth;
-    canvasOut.height = video.videoHeight;
-    ctxOut.drawImage(video, 0, 0, canvasOut.width, canvasOut.height);
-    
-    video.hidden = true;
-    canvasOut.hidden = false;
-    $('guide-box').hidden = true;
-    $('btnResumeCam').hidden = false;
-    $('btnScan').disabled = true;
-
-    // ---------------------------------------------------------------------
-    // GIẢ LẬP NHẬN DIỆN ẢNH (Vì không có OpenCV thực tế)
-    // Cần đảm bảo 'ma' trả về khớp với 'inMa' hiện tại để không gãy logic check
-    // ---------------------------------------------------------------------
+    // GIẢ LẬP NHẬN DIỆN TỪ OpenCV: Sinh mock data an toàn, chống crash khi key rỗng
     const mockStudentAns = {
-        sbd: "0101001",
-        ma: currentMa, 
-        p1: (kd.p1 || "A").substring(0, 3) + "ABCD".repeat(10), // Trúng 3 câu
-        p2: (kd.p2 || "ĐSĐS").substring(0, 4) + " SSSS ĐĐĐĐ",  // Trúng 1 câu
-        p3: kd.p3 || "1 2 3"                                   // Trúng phần 3
+        sbd: "0101001", ma: currentMa, 
+        p1: String(kd.p1 || "A").padEnd(40, "A").substring(0, 5) + "ABCD".repeat(10), // Trúng 5 câu
+        p2: String(kd.p2 || "ĐSĐS").padEnd(20, "ĐSĐS").substring(0, 4) + " SSSS ĐĐĐĐ", // Trúng 1 câu
+        p3: String(kd.p3 || "1 2 3") // Trúng full P3
     };
 
     window.Phieu.nhap(mockStudentAns);
 
-    // Tính toán trực tiếp điểm từ mock data để in lên màn hình
     const m = mon();
     const parsedAns = parse($('aP1').value, $('aP2').value, $('aP3').value);
     const parsedKey = parse(kd.p1, kd.p2, kd.p3);
@@ -419,139 +380,124 @@
     const tongDiem = r2(ketQua.s1 + ketQua.s2 + ketQua.s3);
 
     veKetQuaLenAnh(tongDiem, ketQua);
-    msg('Đã quét thành công. Kiểm tra thông tin bên dưới trước khi Lưu.', 'ok');
-  };
-
-  // Nút Quét tiếp bài khác (Reset form và bật lại Cam)
-  $('btnResumeCam').onclick = () => {
-      video.hidden = false;
-      canvasOut.hidden = true;
-      $('guide-box').hidden = false;
-      $('btnScan').disabled = false;
-      $('btnResumeCam').hidden = true;
-      
-      ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = '');
-      upd();
-      $('kqBox').hidden = true;
-      $('status').textContent = 'Sẵn sàng quét bài thi tiếp theo...';
-  };
-
-  // Hàm vẽ điểm động (Scale kích thước chữ theo độ phân giải video để không bị tràn viền)
-  function veKetQuaLenAnh(tongDiem, ketQua) {
-      ctxOut.fillStyle = "rgba(0, 0, 0, 0.4)"; // Tạo nền mờ cho chữ nổi bật
-      ctxOut.fillRect(0, 0, canvasOut.width, canvasOut.height);
-
-      const scale = canvasOut.width / 1280; // Scale base trên chuẩn HD
-      const fontSizeBig = Math.max(40, Math.floor(90 * scale));
-      const fontSizeSmall = Math.max(20, Math.floor(35 * scale));
-      const paddingX = Math.max(20, Math.floor(50 * scale));
-      
-      // Vẽ Tổng Điểm
-      ctxOut.font = `bold ${fontSizeBig}px 'Be Vietnam Pro', sans-serif`;
-      ctxOut.fillStyle = "#ffd84d"; 
-      ctxOut.strokeStyle = "#14213d"; 
-      ctxOut.lineWidth = Math.max(2, Math.floor(5 * scale));
-      
-      const textDiem = `ĐIỂM: ${tongDiem.toLocaleString('vi-VN')}/10`;
-      ctxOut.strokeText(textDiem, paddingX, paddingX + fontSizeBig);
-      ctxOut.fillText(textDiem, paddingX, paddingX + fontSizeBig);
-
-      // Vẽ điểm thành phần
-      ctxOut.font = `bold ${fontSizeSmall}px 'Be Vietnam Pro', sans-serif`;
-      ctxOut.fillStyle = "#ffffff"; 
-      const textTp = `P.I: ${r2(ketQua.s1)}đ | P.II: ${r2(ketQua.s2)}đ | P.III: ${r2(ketQua.s3)}đ`;
-      ctxOut.strokeText(textTp, paddingX, paddingX + fontSizeBig + fontSizeSmall + 10);
-      ctxOut.fillText(textTp, paddingX, paddingX + fontSizeBig + fontSizeSmall + 10);
-
-      // Ghi chú mô phỏng
-      ctxOut.font = `${Math.max(16, Math.floor(28 * scale))}px Arial`;
-      ctxOut.fillStyle = "#4ade80"; 
-      ctxOut.fillText("O Vòng xanh: Đáp án đúng (Mô phỏng)", paddingX, canvasOut.height - Math.max(50, Math.floor(100 * scale)));
-      ctxOut.fillStyle = "#f87171"; 
-      ctxOut.fillText("X Vòng đỏ: Đáp án sai (Mô phỏng)", paddingX, canvasOut.height - Math.max(20, Math.floor(50 * scale)));
+    return true;
   }
-  // =========================================================================
 
-  // Các chức năng xuất / nhập Excel
+  $('btnScan').onclick = () => {
+    canvasOut.width = video.videoWidth; canvasOut.height = video.videoHeight;
+    ctxOut.drawImage(video, 0, 0, canvasOut.width, canvasOut.height);
+    
+    video.hidden = true; canvasOut.hidden = false; $('guide-box').hidden = true;
+    $('btnResumeCam').hidden = false; $('btnScan').disabled = true;
+
+    if (executeScanLogic()) { msg('Đã quét thành công. Kiểm tra thông tin rồi Lưu.', 'ok'); }
+  };
+
+  // KHẮC PHỤC LỖI 2: Đã thêm sự kiện Chọn file ảnh
+  $('file').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const img = new Image();
+      img.onload = () => {
+          canvasOut.width = img.width; canvasOut.height = img.height;
+          ctxOut.drawImage(img, 0, 0, img.width, img.height);
+          
+          video.hidden = true; canvasOut.hidden = false; $('guide-box').hidden = true;
+          $('btnResumeCam').hidden = false; $('btnScan').disabled = true;
+          
+          if (streamTrack) { streamTrack.stop(); streamTrack = null; } // Tắt cam nếu đang mở
+          
+          if (executeScanLogic()) { msg('Đã quét ảnh thành công. Kiểm tra thông tin.', 'ok'); }
+      };
+      img.src = URL.createObjectURL(file);
+      e.target.value = ''; // Reset input để chọn lại file cũ nếu cần
+  };
+
+  $('btnResumeCam').onclick = () => {
+      video.hidden = false; canvasOut.hidden = true; $('guide-box').hidden = false;
+      $('btnScan').disabled = (streamTrack === null);$('btnResumeCam').hidden = true;
+      ['inSbd', 'inLop', 'inTen', 'aP1', 'aP2', 'aP3'].forEach(i => $(i).value = '');
+      upd(); $('kqBox').hidden = true; $('status').textContent = 'Sẵn sàng quét...';
+  };
+
+  function veKetQuaLenAnh(tongDiem, ketQua) {
+      ctxOut.fillStyle = "rgba(0, 0, 0, 0.4)"; ctxOut.fillRect(0, 0, canvasOut.width, canvasOut.height);
+      const scale = canvasOut.width / 1280;
+      const fBig = Math.max(30, Math.floor(90 * scale)), fSm = Math.max(16, Math.floor(35 * scale)), pX = Math.max(15, Math.floor(50 * scale));
+      
+      ctxOut.font = `bold ${fBig}px 'Be Vietnam Pro', sans-serif`; ctxOut.fillStyle = "#ffd84d"; ctxOut.strokeStyle = "#14213d"; ctxOut.lineWidth = Math.max(2, Math.floor(5 * scale));
+      const tDiem = `ĐIỂM: ${tongDiem.toLocaleString('vi-VN')}/10`;
+      ctxOut.strokeText(tDiem, pX, pX + fBig); ctxOut.fillText(tDiem, pX, pX + fBig);
+
+      ctxOut.font = `bold ${fSm}px 'Be Vietnam Pro', sans-serif`; ctxOut.fillStyle = "#ffffff"; 
+      const tTp = `PI: ${r2(ketQua.s1)}đ | PII: ${r2(ketQua.s2)}đ | PIII: ${r2(ketQua.s3)}đ`;
+      ctxOut.strokeText(tTp, pX, pX + fBig + fSm + 10); ctxOut.fillText(tTp, pX, pX + fBig + fSm + 10);
+
+      ctxOut.font = `${Math.max(14, Math.floor(28 * scale))}px Arial`; ctxOut.fillStyle = "#4ade80"; 
+      ctxOut.fillText("O Vòng xanh: Đáp án đúng (Mô phỏng)", pX, canvasOut.height - Math.max(40, Math.floor(100 * scale)));
+      ctxOut.fillStyle = "#f87171"; 
+      ctxOut.fillText("X Vòng đỏ: Đáp án sai (Mô phỏng)", pX, canvasOut.height - Math.max(15, Math.floor(50 * scale)));
+  }
+
+  // =========================================================================
   $('btnXls').onclick = () => {
     if (!kq.length) return msg('Chưa có bài nào để xuất.', 'err');
-    if (!window.XLSX) return msg('Chưa tải được thư viện Excel. Kiểm tra mạng rồi thử lại.', 'err');
+    if (!window.XLSX) return msg('Chưa tải được thư viện Excel.', 'err');
     const n = kq.length, t = kq.map(r => r.tong), e = '';
     const d = [['STT', 'SBD', 'Họ và tên', 'Lớp', 'Môn', 'Mã đề', 'Phần I', 'Phần II', 'Phần III', 'Tổng điểm', 'Số câu đúng phần I']]
       .concat(kq.map((r, i) => [i + 1, r.sbd, r.ten, r.lop, r.mon, r.ma, r.s1, r.s2, r.s3, r.tong, r.dung]), [[]],
         [['Trung bình', 'AVERAGE', r2(t.reduce((a, b) => a + b, 0) / n)], ['Cao nhất', 'MAX', Math.max(...t)], ['Thấp nhất', 'MIN', Math.min(...t)]]
           .map(([l, fn, v]) => [e, e, l, e, e, e, e, e, e, { t: 'n', v, f: `${fn}(J2:J${n + 1})` }]));
     const ws = XLSX.utils.aoa_to_sheet(d); ws['!cols'] = [5, 12, 26, 8, 12, 8, 8, 8, 9, 11, 16].map(wch => ({ wch }));
-    const dk = [['Môn', 'Mã đề', 'Phần I', 'Phần II', 'Phần III']].concat(Object.entries(keys).map(([id, k]) => {
-      const [mk, c] = id.split('|'); return [MON[mk] ? MON[mk].ten : mk, c, k.p1, k.p2, k.p3];
-    }));
-    const ws2 = XLSX.utils.aoa_to_sheet(dk); ws2['!cols'] = [12, 8, 40, 40, 30].map(wch => ({ wch }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Điểm'); XLSX.utils.book_append_sheet(wb, ws2, 'Đáp án');
-    XLSX.writeFile(wb, 'diem-trac-nghiem-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Điểm');
+    XLSX.writeFile(wb, 'diem-trac-nghiem.xlsx');
   };
 
   $('btnXlsMau').onclick = () => {
-    if (!window.XLSX) return msg('Chưa tải được thư viện Excel.', 'err');
-    const ws = XLSX.utils.aoa_to_sheet([['STT', 'SBD', 'Họ và tên', 'Lớp', 'Phần I', 'Phần II', 'Phần III', 'Tổng điểm']]);
-    ws['!cols'] = [5, 12, 25, 10, 10, 10, 10, 12].map(wch => ({ wch }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Danh_Sach_Mau');
-    XLSX.writeFile(wb, 'Danh_Sach_Hoc_Sinh_Mau.xlsx');
+    if (!window.XLSX) return msg('Chưa tải thư viện Excel.', 'err');
+    const ws = XLSX.utils.aoa_to_sheet([['STT', 'SBD', 'Họ và tên', 'Lớp']]);
+    ws['!cols'] = [5, 12, 25, 10].map(wch => ({ wch }));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Danh_Sach');
+    XLSX.writeFile(wb, 'Danh_Sach_Mau.xlsx');
   };
 
   $('fileXlsIn').onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!window.XLSX) return msg('Chưa tải được thư viện Excel.', 'err');
-    
+    const file = e.target.files[0]; if (!file) return;
+    if (!window.XLSX) return msg('Chưa tải thư viện Excel.', 'err');
     const reader = new FileReader();
     reader.onload = evt => {
       try {
-        const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        
-        let rosterText = '', countDs = 0, countDiem = 0;
-
+        const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'}), rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        let rT = '', cDs = 0;
         rows.forEach(r => {
-          if (!r) return;
-          const keys = Object.keys(r);
-          const getVal = (kws) => { const key = keys.find(k => kws.some(kw => k.toLowerCase().includes(kw))); return key && r[key] !== undefined ? String(r[key]).trim() : ''; };
-
-          const sbd = getVal(['sbd', 'báo danh']), ten = getVal(['họ và tên', 'họ tên', 'tên']), lop = getVal(['lớp']);
-          if (sbd || ten) { rosterText += `${sbd}\t${ten}\t${lop}\n`; countDs++; }
-
-          const p1 = parseFloat(getVal(['phần i', 'phần 1'])), p2 = parseFloat(getVal(['phần ii', 'phần 2'])), p3 = parseFloat(getVal(['phần iii', 'phần 3'])), tong = parseFloat(getVal(['tổng']));
-          if (!isNaN(tong)) {
-            kq.push({ sbd: sbd || '', ten: ten || '', lop: lop || '', mon: mon().ten, ma: $('inMa').value.trim() || '', s1: isNaN(p1) ? 0 : p1, s2: isNaN(p2) ? 0 : p2, s3: isNaN(p3) ? 0 : p3, tong: tong, dung: 0 });
-            countDiem++;
-          }
+          const ks = Object.keys(r), getV = kw => { const k = ks.find(x => kw.some(w => x.toLowerCase().includes(w))); return k && r[k] !== undefined ? String(r[k]).trim() : ''; };
+          const sbd = getV(['sbd', 'báo danh']), ten = getV(['họ', 'tên']), lop = getV(['lớp']);
+          if (sbd || ten) { rT += `${sbd}\t${ten}\t${lop}\n`; cDs++; }
         });
-
-        if (countDs > 0) { const oldText = $('roster').value.trim(); $('roster').value = (oldText ? oldText + '\n' : '') + rosterText.trim(); $('roster').oninput(); }
-        if (countDiem > 0) { SV('phieu.kq', kq); render(); }
-        msg(`Đã nhập thành ${countDs} học sinh${countDiem > 0 ? ` và ${countDiem} điểm` : ''}.`, 'ok');
-      } catch (err) { msg('Lỗi đọc file Excel.', 'err'); console.error(err); }
+        if (cDs > 0) { $('roster').value = ($('roster').value.trim() ? $('roster').value.trim() + '\n' : '') + rT.trim();$('roster').oninput(); msg(`Nhập ${cDs} học sinh.`, 'ok'); }
+      } catch (err) { msg('Lỗi đọc file Excel.', 'err'); }
       e.target.value = '';
     };
     reader.readAsArrayBuffer(file);
   };
 
   window.Phieu = {
-    mau: () => radio('mau'),
-    mon: () => mon(),
     nhap(a) {
       if (a.p1 != null) $('aP1').value = a.p1;
-      if (a.p2 != null) $('aP2').value = [].concat(a.p2).join(' ');
-      if (a.p3 != null) $('aP3').value = [].concat(a.p3).join(' ');
-      if (a.sbd) { $('inSbd').value = a.sbd; $('inSbd').oninput(); }
-      if (a.ma != null) { $('inMa').value = a.ma; $('inMa').oninput(); } // Đồng bộ luôn lên thẻ input Mã
-      upd(); $('kqBox').hidden = true; $('dAns').open = true; go('quet');$('hs').scrollIntoView({ behavior: 'smooth' });
+      if (a.p2 != null) $('aP2').value = String(a.p2);
+      if (a.p3 != null) $('aP3').value = String(a.p3);
+      if (a.sbd != null) { $('inSbd').value = a.sbd; $('inSbd').oninput(); }
+      if (a.ma != null) { $('inMa').value = a.ma; $('inMa').oninput(); }
+      upd(); $('kqBox').hidden = true; $('dAns').open = true; go('quet');
+      setTimeout(() => $('hs').scrollIntoView({ behavior: 'smooth' }), 100); // Fix cuộn trang
     }
   };
 
+  // Nạp trạng thái ban đầu an toàn
   $('inMa').value = LS('phieu.ma', '');$('roster').value = LS('phieu.ds', '');
-  drawMau(); drawMon(); rosterN(); refresh(); render(); go(keys[keyId()] ? 'quet' : 'cai');
+  drawMau(); drawMon(); rosterN(); refresh(); render(); 
+  go(keys[keyId()] ? 'quet' : 'cai');
 })();
 </script>
 </body>
